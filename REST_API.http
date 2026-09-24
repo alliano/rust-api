@@ -1,0 +1,30 @@
+### POST USER
+POST http://127.0.0.1:8080/v1/user HTTP/1.1
+Content-Type: application/json
+Accept: application/json
+
+{
+    "id": 2,
+    "name": "Ani Nur Febriani",
+    "email": "ami@gmail.com",
+    "password": "Rahasia"
+}
+
+
+### GET USERS
+GET http://127.0.0.1:8080/v1/user HTTP/1.1
+Accept: application/json
+
+### GET USER BY ID
+GET http://127.0.0.1:8080/v1/user/1 HTTP/1.1
+Accept: application/json
+
+### POST HOBIE
+POST http://127.0.0.1:8080/v1/user/hobbie HTTP/1.1
+Content-Type: application/json
+Accept: application/json
+
+{
+    "id": 1,
+    "name": "Swing Trading"
+}
