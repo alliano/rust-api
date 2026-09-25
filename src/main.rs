@@ -1,165 +1,113 @@
-use std::sync::Arc;
-
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::{AppendHeaders, IntoResponse};
+use axum::{Json, extract::State, http::StatusCode, routing::post};
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
-use axum::{Json, Router};
-use axum::routing::{get, post};
-use tokio::sync::Mutex;
-
 
 #[tokio::main]
-async fn main() {    
+async fn main(){
     dotenv::dotenv().ok();
 
     let database_url: String = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must provided in .env");
+        .expect("DATABASE_URL must provided");
 
-    let database_pool = sqlx::PgPool::connect(&database_url)
+    let database_pool: sqlx::PgPool = sqlx::PgPool::connect(&database_url)
         .await
-        .expect("Failed to create database PgPool");
+        .expect("Faild Create Database PgPool");
 
 
-    let app_state = AppState {
-        users: Arc::new(Mutex::new(Vec::new())),
-        db_pool: database_pool
+
+    let app_state = ApplicationState {
+        database: database_pool
     };
 
-    // membuat router group
-    let user_group_router = Router::new()
-        .route("/", get(get_users))
+
+    let user_router_group = axum::Router::new()
         .route("/", post(handle_post_user))
-        .route("/profile", get(get_user_profile))
-        .route("/{id}", get(handle_get_user_by_id))
-        .route("/pages", get(handle_get_user_with_pagging))
-        .route("/hobbie", post(handle_post_hobbie))
         .with_state(app_state);
 
-    let app = Router::new()
-        .nest("/v1/user", user_group_router);
-    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}
+    let main_router = axum::Router::new()
+        .nest("/api/v1/user", user_router_group);
 
-async fn get_users(State(app_state): State<AppState>) -> Json<Vec<User>> {
-    let users = app_state.users.lock().await;
-    Json(users.clone())
-}
-
-
-async fn get_user_profile() -> String {
-    String::from("{name: Kim jeha, age: 23}")
-}
-
-
-
-// membuat http response
-/*
- * axum::Json<T> ini sudah mengimplementasikan IntoResponse
- * Jadi semua data yang akan di response kan ke user harus implement IntoResponse 
- */
-async fn  handle_get_user_by_id(Path(id): Path<u32>, State(app_state): State<AppState>)-> (StatusCode, Json<GetUserResponse>){
-    
-    let fetch_date: chrono::NaiveDate = sqlx::query_scalar("SELECT CURRENT_DATE")
-        .fetch_one(&app_state.db_pool)
+    let listerner = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
-        .expect("Faild to fetch version");
+        .unwrap();
+
+    axum::serve(listerner, main_router)
+        .await
+        .unwrap();
+}
+
+
+
+
+/**
+ * User handlers
+ */
+async fn handle_post_user(State(app_state): State<ApplicationState> ,axum::Json(payload): Json<CreateUserRequest>) -> (StatusCode, Json<CreateUserResponse>){
     
-    return (StatusCode::OK, Json(GetUserResponse { 
-        id: id, 
-        name: String::from("Abdillah Kim"),
-        email: String::from("kim@gmail.com"),
-        featch_date: fetch_date
-    }));
     
-}
-
-
-
-async fn handle_get_user_with_pagging(Query(pagination): Query<Paggination>) -> String {
-    format!("get user in page: {}, and page_size: {}", pagination.page, pagination.page_size)
-}
-
-
-async fn handle_post_user(State(app_state): State<AppState>, Json(payload): Json<CreateUserRequest>) -> (StatusCode, Json<CreateUserRespose>) {
-    let mut users = app_state.users.lock().await;
-    users.push(User { id: payload.id, name: payload.name.clone(), email: payload.email.clone(), password: payload.password.clone() });
-     
-    return (StatusCode::CREATED, Json(CreateUserRespose {
-        id: payload.id,
-        name: payload.name,
-        email: payload.email,
-        password: payload.password
+    let user = sqlx::query_as!(
+        User,
+        "INSERT INTO users(name, email, password, is_active)
+            VALUES($1, $2, $3, $4)
+             RETURNING id, name, email, is_active, created_at, updated_at",
+        payload.name, payload.email, payload.password, payload.is_active
+    ).fetch_one(&app_state.database)
+    .await
+    .expect("Failed Insert New User");
+    
+    return (StatusCode::CREATED, Json(CreateUserResponse{
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        updated_at: user.updated_at
     }));
 }
 
 
-async fn handle_post_hobbie(Json(hobbie): Json<CreateHobbie>) -> impl IntoResponse {
-    return (
-        StatusCode::CREATED,
-        AppendHeaders([
-            ("X-POWERED-BY", "AXUM"),
-            ("API-VERSION", "V1")
-        ]),
-        Json(CreateHobbie {
-            id: hobbie.id,
-            name: hobbie.name
-        })
-    );
-}
+
+/*
+ * Application State 
+ */
 
 
-#[derive(Deserialize, Serialize)]
-struct CreateHobbie {
-    id: u32,
-    name: String
-}
+ #[derive(Clone)]
+ struct ApplicationState {
+    database: sqlx::PgPool
+ }
 
-#[derive(Deserialize)]
-struct CreateUserRequest {
-    id: u32,
+
+
+/*
+ * USER SPEC SCHEMA AND DTO
+ */
+
+
+ #[derive(Deserialize)]
+ struct CreateUserRequest {
     name: String,
     email: String,
-    password: String
-}
+    password: String,
+    is_active: bool,
+ }
 
-#[derive(Serialize)]
-struct CreateUserRespose {
-    id: u32,
-    name: String,
+ #[derive(Serialize)]
+ struct CreateUserResponse {
+    id: i64,
+    name: Option<String>,
     email: String,
-    password: String
-}
+    is_active: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+ }
 
-#[derive(Serialize)]
-struct GetUserResponse {
-    id: u32,
-    name: String,
-    email: String,
-    featch_date: chrono::NaiveDate
-}
-
-
-
-#[derive(Deserialize)]
-struct  Paggination {
-    page: u32,
-    page_size: u32
-}
-
-
-#[derive(Serialize, Deserialize, Clone)]
-struct User {
-    id: u32,
-    name: String,
-    email: String,
-    password: String
-}
 
 #[derive(Clone)]
-struct AppState {
-    users: Arc<Mutex<Vec<User>>>,
-    db_pool: sqlx::PgPool
+struct User {
+    id: i64,
+    name: Option<String>,
+    email: String,
+    is_active: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }

@@ -9,4 +9,5 @@ chrono = {version = "0.4.45", features = ["serde"]}
 dotenv = "0.15.0"
 serde = { version = "1.0.229", features = ["derive"]}
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "macros"] }
+sqlx-cli = { version = "0.9.0", default-features = false, features = ["postgres", "rustls"] }
 tokio = { version = "1.53.1", features = ["full"] }
