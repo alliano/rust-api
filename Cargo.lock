@@ -1290,6 +1290,7 @@ dependencies = [
  "serde",
  "sqlx",
  "sqlx-cli",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
